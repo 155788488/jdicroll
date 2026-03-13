@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude_ai_Notion__notion-search",
+      "Bash(command -v gh)",
+      "Bash(command -v npm)",
+      "Bash(command -v bun)",
+      "Read(//c/Users/wlghd/.claude/**)",
+      "Bash(cd \"C:/Users/wlghd/Desktop/개발/daily-lecture-tracker-web\" && npx tsc --noEmit --pretty 2>&1 | head -50)",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "WebFetch(domain:www.titanclass.co.kr)",
+      "WebFetch(domain:www.fitchnic.com)",
+      "WebFetch(domain:www.invader.co.kr)",
+      "WebFetch(domain:www.nlab.kr)",
+      "WebFetch(domain:www.ivyclass.co.kr)",
+      "WebFetch(domain:harvardclass.co.kr)",
+      "WebFetch(domain:amag-class.kr)",
+      "Bash(cd \"C:\\\\Users\\\\wlghd\\\\Desktop\\\\개발\\\\daily-lecture-tracker-web\" && npx tsc --noEmit --pretty 2>&1 | head -60)",
+      "Bash(cd \"C:\\\\Users\\\\wlghd\\\\Desktop\\\\개발\\\\daily-lecture-tracker-web\" && npx tsc --noEmit 2>&1)",
+      "Bash(git --version 2>&1)"
+    ]
+  }
+}
