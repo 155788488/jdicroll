@@ -160,7 +160,12 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.success) {
         const r = data.result;
-        if (r.status === 'success') {
+        if (data.alreadyCrawled) {
+          setMessage({
+            text: `ℹ️ 오늘 이미 조회된 강의입니다 (${r.platform} - ${r.enrollmentCount}건)`,
+            type: 'info',
+          });
+        } else if (r.status === 'success') {
           setMessage({
             text: `✅ 완료! ${r.platform} - ${r.enrollmentCount}건 결제 (예상 매출: ${r.estimatedRevenue ? r.estimatedRevenue.toLocaleString() + '원' : '가격 미확인'})`,
             type: 'success',
@@ -170,8 +175,10 @@ export default function Dashboard() {
         }
         setUrl('');
         setInstructor('');
-        setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
-        fetchResults();
+        if (!data.alreadyCrawled) {
+          setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
+          fetchResults();
+        }
       } else {
         setMessage({ text: `❌ 실패: ${data.error}`, type: 'error' });
       }

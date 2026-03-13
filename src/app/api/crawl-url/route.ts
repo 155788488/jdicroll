@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
     const { withPage } = await import('@/lib/crawler/browser');
     const { extractEnrollment } = await import('@/lib/crawler/extractors');
 
+    const today = getTodayKST();
+
     const results = await withPage(async (page) => {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
       await page.waitForTimeout(2000);
@@ -31,78 +33,107 @@ export async function POST(req: NextRequest) {
       const courseId = courseIdMatch ? courseIdMatch[1] : '';
 
       const pageTitle = await page.title();
-      const courseTitle = pageTitle
-        .replace(/ \| .*$/, '')
-        .trim() || url;
+      const courseTitle = pageTitle.replace(/ \| .*$/, '').trim() || url;
+
+      // 오늘 이미 조회한 강의인지 확인 (단일 옵션 기준)
+      const { data: existing } = await supabaseAdmin
+        .from('crawl_results')
+        .select('*')
+        .eq('crawl_date', today)
+        .eq('platform', finalPlatform)
+        .ilike('course_title', `${courseTitle}%`)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        // 오늘 이미 조회된 결과 — 캐시 반환
+        const cached = existing[0];
+        return {
+          alreadyCrawled: true,
+          results: [{
+            platform: cached.platform,
+            instructor: cached.instructor,
+            courseTitle: cached.course_title,
+            optionName: cached.option_name,
+            enrollmentCount: cached.enrollment_count,
+            price: cached.price,
+            estimatedRevenue: cached.estimated_revenue,
+            status: cached.status,
+          }],
+        };
+      }
 
       const method = getExtractionMethod(finalPlatform);
       const extractedOptions = await extractEnrollment(page, method, courseId);
 
-      return extractedOptions.map(opt => ({
-        platform: finalPlatform,
-        instructor: instructor || '미입력',
-        courseTitle,
-        optionName: opt.optionName,
-        enrollmentCount: opt.enrollmentCount,
-        price: opt.price,
-        estimatedRevenue: opt.enrollmentCount && opt.price
-          ? opt.enrollmentCount * opt.price
-          : null,
-        status: opt.enrollmentCount !== null ? 'success' : 'failed',
-      }));
+      return {
+        alreadyCrawled: false,
+        results: extractedOptions.map(opt => ({
+          platform: finalPlatform,
+          instructor: instructor || '미입력',
+          courseTitle,
+          optionName: opt.optionName,
+          enrollmentCount: opt.enrollmentCount,
+          price: opt.price,
+          estimatedRevenue: opt.enrollmentCount && opt.price
+            ? opt.enrollmentCount * opt.price
+            : null,
+          status: opt.enrollmentCount !== null ? 'success' : 'failed',
+        })),
+      };
     });
 
-    // 옵션별로 각각 저장 (옵션명을 강의제목에 포함해서 unique 충돌 방지)
-    const today = getTodayKST();
-    for (const r of results) {
-      const storageTitle = results.length > 1
-        ? `${r.courseTitle} - ${r.optionName}`
-        : r.courseTitle;
+    // 이미 조회된 결과면 저장·노션 업로드 스킵
+    if (!results.alreadyCrawled) {
+      for (const r of results.results) {
+        const storageTitle = results.results.length > 1
+          ? `${r.courseTitle} - ${r.optionName}`
+          : r.courseTitle;
 
-      await supabaseAdmin
-        .from('crawl_results')
-        .upsert({
-          crawl_date: today,
-          platform: r.platform,
+        await supabaseAdmin
+          .from('crawl_results')
+          .upsert({
+            crawl_date: today,
+            platform: r.platform,
+            instructor: r.instructor,
+            course_title: storageTitle,
+            enrollment_count: r.enrollmentCount,
+            price: r.price,
+            option_name: r.optionName,
+            estimated_revenue: r.estimatedRevenue,
+            status: r.status,
+          }, { onConflict: 'crawl_date,platform,course_title' });
+      }
+
+      const successResults = results.results.filter(r => r.status === 'success');
+      if (process.env.NOTION_API_KEY && successResults.length > 0) {
+        const { writeReport } = await import('@/lib/notion');
+        await writeReport(successResults.map(r => ({
           instructor: r.instructor,
-          course_title: storageTitle,
-          enrollment_count: r.enrollmentCount,
-          price: r.price,
-          option_name: r.optionName,
-          estimated_revenue: r.estimatedRevenue,
-          status: r.status,
-        }, { onConflict: 'crawl_date,platform,course_title' });
+          courseTitle: r.courseTitle,
+          platform: r.platform,
+          date: today,
+          optionName: r.optionName || '',
+          optionPrice: r.price || 0,
+          enrollmentCount: r.enrollmentCount || 0,
+        })));
+      }
     }
 
-    // 노션 강의 전환 리포트 업로드
-    const successResults = results.filter(r => r.status === 'success');
-    if (process.env.NOTION_API_KEY && successResults.length > 0) {
-      const { writeReport } = await import('@/lib/notion');
-      await writeReport(successResults.map(r => ({
-        instructor: r.instructor,
-        courseTitle: r.courseTitle,
-        platform: r.platform,
-        date: today,
-        optionName: r.optionName || '',
-        optionPrice: r.price || 0,
-        enrollmentCount: r.enrollmentCount || 0,
-      })));
-    }
-
-    const totalEnrollments = results.reduce((s, r) => s + (r.enrollmentCount || 0), 0);
-    const totalRevenue = results.reduce((s, r) => s + (r.estimatedRevenue || 0), 0);
-    const hasSuccess = results.some(r => r.status === 'success');
+    const totalEnrollments = results.results.reduce((s, r) => s + (r.enrollmentCount || 0), 0);
+    const totalRevenue = results.results.reduce((s, r) => s + (r.estimatedRevenue || 0), 0);
+    const hasSuccess = results.results.some(r => r.status === 'success');
 
     return NextResponse.json({
       success: true,
+      alreadyCrawled: results.alreadyCrawled,
       result: {
-        ...results[0],
+        ...results.results[0],
         enrollmentCount: totalEnrollments,
         estimatedRevenue: totalRevenue,
         status: hasSuccess ? 'success' : 'failed',
-        optionCount: results.length,
+        optionCount: results.results.length,
       },
-      options: results,
+      options: results.results,
     });
 
   } catch (error) {
