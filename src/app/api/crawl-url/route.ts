@@ -106,16 +106,20 @@ export async function POST(req: NextRequest) {
 
       const successResults = results.results.filter(r => r.status === 'success');
       if (process.env.NOTION_API_KEY && successResults.length > 0) {
-        const { writeReport } = await import('@/lib/notion');
-        await writeReport(successResults.map(r => ({
-          instructor: r.instructor,
-          courseTitle: r.courseTitle,
-          platform: r.platform,
-          date: today,
-          optionName: r.optionName || '',
-          optionPrice: r.price || 0,
-          enrollmentCount: r.enrollmentCount || 0,
-        })));
+        try {
+          const { writeReport } = await import('@/lib/notion');
+          await writeReport(successResults.map(r => ({
+            instructor: r.instructor,
+            courseTitle: r.courseTitle,
+            platform: r.platform,
+            date: today,
+            optionName: r.optionName || '',
+            optionPrice: r.price || 0,
+            enrollmentCount: r.enrollmentCount || 0,
+          })));
+        } catch (notionErr) {
+          console.error('Notion 저장 실패 (결과는 DB에 저장됨):', notionErr instanceof Error ? notionErr.message : String(notionErr));
+        }
       }
     }
 
