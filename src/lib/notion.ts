@@ -1,16 +1,32 @@
-import { Client } from '@notionhq/client';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const notion = new Client({ auth: process.env.NOTION_API_KEY }) as any;
 
 const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DB_ID!;
 const REPORT_DB_ID = process.env.NOTION_REPORT_DB_ID!;
+const NOTION_API_VERSION = '2022-06-28';
+
+// SDK 호환성 문제 우회 — REST API 직접 호출
+async function scheduleRequest(path: string, body: unknown): Promise<{ results?: unknown[] }> {
+  const res = await fetch(`https://api.notion.com/v1${path}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Notion-Version': NOTION_API_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Notion API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
 
 export interface LectureSchedule {
   instructor: string;
   courseTitle: string;
   platform: string;
   date: string;
+  url?: string;
 }
 
 export interface CrawlResult {
@@ -34,11 +50,10 @@ export async function getYesterdayLectures(): Promise<LectureSchedule[]> {
 
   const results: LectureSchedule[] = [];
 
-  // 10개 플랫폼 병렬 검색
+  // 10개 플랫폼 병렬 검색 (REST API 직접 호출 — SDK 호환성 문제 우회)
   const searches = await Promise.allSettled(
     platforms.map(platform =>
-      notion.databases.query({
-        database_id: SCHEDULE_DB_ID,
+      scheduleRequest(`/databases/${SCHEDULE_DB_ID}/query`, {
         filter: {
           and: [
             { property: '플랫폼', select: { equals: platform } },
@@ -49,27 +64,32 @@ export async function getYesterdayLectures(): Promise<LectureSchedule[]> {
     )
   );
 
-  for (const result of searches) {
+  for (let idx = 0; idx < searches.length; idx++) {
+    const result = searches[idx];
     if (result.status === 'fulfilled') {
-      for (const page of result.value.results) {
+      for (const page of (result.value.results ?? [])) {
         const props = (page as any).properties;
         results.push({
           instructor: props['강사']?.title?.[0]?.plain_text || '',
           courseTitle: props['강의 제목']?.rich_text?.[0]?.plain_text || '',
           platform: props['플랫폼']?.select?.name || '',
+          url: props['URL']?.url || undefined,
           date: yesterday,
         });
       }
+    } else {
+      console.error(`[Notion] ${platforms[idx]} 조회 실패:`, result.reason);
     }
   }
+  console.log(`[Notion] ${yesterday} 강의 ${results.length}건 조회:`, results.map(r => `${r.platform}-${r.instructor}`).join(', '));
 
   return results;
 }
 
-// 3단계: 노션 '강의 전환 리포트' DB에 결과 기록
+// 3단계: 노션 '강의 전환 리포트' DB에 결과 기록 (REST API 직접 호출 — SDK 호환성 문제 우회)
 export async function writeReport(results: CrawlResult[]): Promise<void> {
   for (const r of results) {
-    await notion.pages.create({
+    await scheduleRequest('/pages', {
       parent: { database_id: REPORT_DB_ID },
       properties: {
         '강사명': { title: [{ text: { content: r.instructor } }] },

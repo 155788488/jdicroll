@@ -29,7 +29,9 @@ export async function POST(req: NextRequest) {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
       await page.waitForTimeout(2000);
 
-      const courseIdMatch = url.match(/\/courses\/([a-zA-Z0-9_-]+)/);
+      const coursePathMatch = url.match(/(\/(?:free-)?courses\/[a-zA-Z0-9_-]+)/);
+      const coursePath = coursePathMatch ? coursePathMatch[1] : '';
+      const courseIdMatch = coursePath.match(/\/([a-zA-Z0-9_-]+)$/);
       const courseId = courseIdMatch ? courseIdMatch[1] : '';
 
       const pageTitle = await page.title();
@@ -63,7 +65,7 @@ export async function POST(req: NextRequest) {
       }
 
       const method = getExtractionMethod(finalPlatform);
-      const extractedOptions = await extractEnrollment(page, method, courseId);
+      const extractedOptions = await extractEnrollment(page, method, courseId, coursePath);
 
       return {
         alreadyCrawled: false,
@@ -165,6 +167,7 @@ function detectPlatform(url: string): string | null {
 function getExtractionMethod(platform: string): string {
   if (platform === '타이탄클래스') return 'trpc';
   if (platform === '아마겟돈클래스') return 'login-required';
+  if (platform === '코주부클래스') return 'cojooboo';
   return 'rsc-fetch'; // 하버드 포함 모든 플랫폼 rsc-fetch로 통일
 }
 

@@ -3,7 +3,7 @@ export interface Platform {
   name: string;
   slug: string;
   coursesUrl: string;
-  extractionMethod: 'trpc' | 'rsc-script' | 'rsc-fetch' | 'api' | 'login-required';
+  extractionMethod: 'trpc' | 'rsc-script' | 'rsc-fetch' | 'cojooboo' | 'api' | 'login-required';
   enrollmentField: string;
   requiresLogin: boolean;
 }
@@ -32,7 +32,7 @@ export const PLATFORMS: Platform[] = [
     name: '코주부클래스',
     slug: 'cojooboo',
     coursesUrl: 'https://www.cojooboo.co.kr/courses',
-    extractionMethod: 'rsc-fetch',
+    extractionMethod: 'cojooboo',
     enrollmentField: 'enrollments',
     requiresLogin: false,
   },

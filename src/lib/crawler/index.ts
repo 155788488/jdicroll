@@ -9,6 +9,7 @@ interface CrawlTarget {
   platform: string;
   instructor: string;
   courseTitle: string;
+  url?: string;
 }
 
 async function findCourseOnPlatform(page: Page, coursesUrl: string, instructor: string): Promise<{ courseId: string; courseUrl: string } | null> {
@@ -16,24 +17,36 @@ async function findCourseOnPlatform(page: Page, coursesUrl: string, instructor: 
   await page.waitForTimeout(2000);
 
   // Look for course card matching instructor name
+  // 유료강의(/courses/)를 우선, /free-courses/ 제외
   const courseLink = await page.evaluate((name) => {
-    const allElements = document.querySelectorAll('a[href*="/courses/"]');
-    for (const el of allElements) {
+    // 1차: 유료강의 링크만 검색 (/courses/ 포함, /free-courses/ 제외)
+    const paidLinks = Array.from(document.querySelectorAll('a[href*="/courses/"]'))
+      .filter(el => !(el as HTMLAnchorElement).href.includes('/free-courses/'));
+    for (const el of paidLinks) {
       const text = el.textContent || '';
       if (text.includes(name)) {
         return (el as HTMLAnchorElement).href;
       }
     }
 
-    // Try broader search in cards
+    // 2차: 카드 내 유료강의 검색
     const cards = document.querySelectorAll('[class*="card"], [class*="Card"], [class*="course"], [class*="Course"]');
     for (const card of cards) {
       const text = card.textContent || '';
       if (text.includes(name)) {
         const link = card.querySelector('a[href*="/courses/"]') as HTMLAnchorElement;
-        if (link) return link.href;
+        if (link && !link.href.includes('/free-courses/')) return link.href;
         const parentLink = card.closest('a[href*="/courses/"]') as HTMLAnchorElement;
-        if (parentLink) return parentLink.href;
+        if (parentLink && !parentLink.href.includes('/free-courses/')) return parentLink.href;
+      }
+    }
+
+    // 3차: 무료강의 포함 전체 검색 (폴백)
+    const allElements = document.querySelectorAll('a[href*="/courses/"]');
+    for (const el of allElements) {
+      const text = el.textContent || '';
+      if (text.includes(name)) {
+        return (el as HTMLAnchorElement).href;
       }
     }
     return null;
@@ -110,28 +123,43 @@ export async function crawlPlatform(target: CrawlTarget): Promise<CrawlResultDat
         }
       }
 
-      // Find the course
-      const course = await findCourseOnPlatform(page, platform.coursesUrl, target.instructor);
-      if (!course) {
-        return {
-          platform: platform.name,
-          instructor: target.instructor,
-          courseTitle: target.courseTitle,
-          enrollmentCount: null,
-          price: null,
-          optionName: '',
-          estimatedRevenue: null,
-          status: 'failed',
-          errorMessage: `Course not found for instructor: ${target.instructor}`,
-        };
+      // Find the course — 유료강의 URL이 있으면 직접 사용, 없으면 목록에서 검색
+      let courseUrl: string;
+      let courseId: string;
+
+      const isPaidUrl = target.url && target.url.includes('/courses/') && !target.url.includes('/free-courses/');
+      if (isPaidUrl && target.url) {
+        courseUrl = target.url;
+        const idMatch = courseUrl.match(/\/courses\/([a-f0-9-]+)/);
+        courseId = idMatch ? idMatch[1] : courseUrl.split('/courses/')[1]?.split(/[?#]/)[0] || '';
+      } else {
+        const course = await findCourseOnPlatform(page, platform.coursesUrl, target.instructor);
+        if (!course) {
+          return {
+            platform: platform.name,
+            instructor: target.instructor,
+            courseTitle: target.courseTitle,
+            enrollmentCount: null,
+            price: null,
+            optionName: '',
+            estimatedRevenue: null,
+            status: 'failed',
+            errorMessage: `Course not found for instructor: ${target.instructor}`,
+          };
+        }
+        courseUrl = course.courseUrl;
+        courseId = course.courseId;
       }
 
-      // Navigate to course detail
-      await page.goto(course.courseUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await page.waitForTimeout(2000);
+      // Navigate to course detail (코주부는 추출기 내부에서 직접 goto + 네트워크 캡처)
+      const coursePath = new URL(courseUrl).pathname;
+      if (platform.extractionMethod !== 'cojooboo') {
+        await page.goto(courseUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.waitForTimeout(2000);
+      }
 
       // Extract enrollment data (배열 반환)
-      const options = await extractEnrollment(page, platform.extractionMethod, course.courseId);
+      const options = await extractEnrollment(page, platform.extractionMethod, courseId, coursePath);
       const first = options[0];
 
       const estimatedRevenue = (first.enrollmentCount && first.price)

@@ -112,7 +112,54 @@ export async function extractViaRscScript(page: Page): Promise<ExtractionResult[
   return [{ enrollmentCount: count, price, optionName: '얼리버드' }];
 }
 
-// Method 3: RSC Fetch (코주부, 아이비, 인베이더, N잡연구소 등) - 다중 옵션 지원
+// Method for 코주부클래스: 페이지 로드 후 스크립트 태그에서 enrollments 추출
+// 코주부는 self.__next_f.push 스크립트로 데이터를 스트리밍하며,
+// 코스 레벨 _count.enrollments에 실제 결제량이 있음
+export async function extractViaCojooboo(page: Page, courseId: string, coursePath?: string): Promise<ExtractionResult[]> {
+  // 페이지 로드 (crawlPlatform에서 코주부는 goto 건너뛰므로 여기서 직접)
+  const targetUrl = coursePath
+    ? `https://www.cojooboo.co.kr${coursePath}`
+    : page.url();
+  await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  // 전체 HTML 소스를 가져와서 Node.js에서 파싱 (스크립트 실행 후 DOM 변경 무관)
+  const html = await page.content();
+
+  // 이스케이프된 따옴표(\" ) 를 일반 따옴표로 변환하여 파싱
+  const normalized = html.replace(/\\"/g, '"');
+
+  // _count.enrollments 값들을 모두 찾아서 가장 큰 값 사용 (코스 레벨 = 실제 결제량)
+  const countMatches = [...normalized.matchAll(/"_count"\s*:\s*\{\s*"enrollments"\s*:\s*(\d+)\s*\}/g)];
+  let maxEnrollments = 0;
+  for (const m of countMatches) {
+    const val = parseInt(m[1]);
+    if (val > maxEnrollments) maxEnrollments = val;
+  }
+
+  // 가격 추출
+  const priceMatch = normalized.match(/"discountedPrice"\s*:\s*(\d+)/)
+    || normalized.match(/"originalPrice"\s*:\s*(\d+)/);
+
+  // 옵션명 추출
+  const optMatch = normalized.match(/"options"\s*:\s*\[\s*\{[^}]*"name"\s*:\s*"([^"]+)"/);
+
+  const result = {
+    enrollmentCount: maxEnrollments > 0 ? maxEnrollments : null,
+    price: priceMatch ? parseInt(priceMatch[1]) : null,
+    optionName: optMatch ? optMatch[1] : '얼리버드',
+  };
+
+  console.log(`[코주부] enrollments=${result.enrollmentCount}, price=${result.price}`);
+
+  return [{
+    enrollmentCount: result.enrollmentCount,
+    price: result.price,
+    optionName: result.optionName,
+  }];
+}
+
+// Method 3: RSC Fetch (아이비, 인베이더, N잡연구소 등) - 다중 옵션 지원
 export async function extractViaRscFetch(page: Page, courseId: string): Promise<ExtractionResult[]> {
   const result = await page.evaluate(async (cid) => {
     try {
@@ -219,7 +266,7 @@ export async function extractViaArmageddonApi(page: Page, classId: string): Prom
 }
 
 // 메인 추출 함수 - 항상 배열 반환
-export async function extractEnrollment(page: Page, method: string, courseId: string): Promise<ExtractionResult[]> {
+export async function extractEnrollment(page: Page, method: string, courseId: string, coursePath?: string): Promise<ExtractionResult[]> {
   switch (method) {
     case 'trpc':
       try { return await extractViaTrpc(page, courseId); } catch {}
@@ -227,6 +274,10 @@ export async function extractEnrollment(page: Page, method: string, courseId: st
 
     case 'rsc-script':
       return extractViaRscScript(page);
+
+    case 'cojooboo':
+      try { return await extractViaCojooboo(page, courseId, coursePath); } catch {}
+      return extractViaRscFetch(page, courseId);
 
     case 'rsc-fetch':
       try { return await extractViaRscFetch(page, courseId); } catch {}

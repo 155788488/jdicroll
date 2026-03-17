@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
         platform: l.platform,
         instructor: l.instructor,
         courseTitle: l.courseTitle,
+        url: l.url,
       }));
     }
 
