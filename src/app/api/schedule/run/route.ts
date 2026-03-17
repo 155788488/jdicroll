@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       .update({ last_run_at: now.toISOString() })
       .not('id', 'is', null);
 
-    return NextResponse.json({ success: true, successCount, failCount, results });
+    return NextResponse.json({ success: true, successCount, failCount, results, crawlDate: yesterday });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : String(error) },

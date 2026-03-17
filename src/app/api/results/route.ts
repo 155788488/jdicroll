@@ -23,3 +23,28 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ results: data });
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { ids } = await req.json();
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ success: false, error: 'ids 배열이 필요합니다' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('crawl_results')
+      .delete()
+      .in('id', ids);
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, deletedCount: ids.length });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}

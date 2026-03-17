@@ -49,6 +49,8 @@ export default function Dashboard() {
   const [scheduleMsg, setScheduleMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [running, setRunning] = useState(false);
   const [integrationStatus, setIntegrationStatus] = useState({ notion: false, slack: false });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchResults();
@@ -66,8 +68,10 @@ export default function Dashboard() {
       const res = await fetch(`/api/results?date=${selectedDate}`);
       const data = await res.json();
       setResults(data.results || []);
+      setSelectedIds(new Set());
     } catch {
       setResults([]);
+      setSelectedIds(new Set());
     }
   }
 
@@ -119,6 +123,10 @@ export default function Dashboard() {
       if (data.success) {
         setScheduleMsg({ text: `✅ 완료! 성공 ${data.successCount}건 / 실패 ${data.failCount}건`, type: 'success' });
         await fetchSchedule();
+        // 크롤링 결과 날짜(어제)로 전환하여 결과 표시
+        if (data.crawlDate) {
+          setSelectedDate(data.crawlDate);
+        }
       } else {
         setScheduleMsg({ text: `❌ 실패: ${data.error}`, type: 'error' });
       }
@@ -186,6 +194,43 @@ export default function Dashboard() {
       setMessage({ text: '❌ 오류가 발생했어요', type: 'error' });
     } finally {
       setCrawling(false);
+    }
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === results.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(results.map(r => r.id)));
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`선택한 ${selectedIds.size}건을 삭제하시겠습니까?`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/results', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedIds(new Set());
+        fetchResults();
+      }
+    } catch {} finally {
+      setDeleting(false);
     }
   }
 
@@ -300,7 +345,18 @@ export default function Dashboard() {
       {/* Results */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">조회 결과</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-gray-900">조회 결과</h2>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={deleteSelected}
+                disabled={deleting}
+                className="px-3 py-1.5 bg-red-500 text-white text-xs font-medium rounded-lg hover:bg-red-600 disabled:bg-gray-300 transition-colors"
+              >
+                {deleting ? '삭제 중...' : `🗑 ${selectedIds.size}건 삭제`}
+              </button>
+            )}
+          </div>
           <input
             type="date"
             value={selectedDate}
@@ -312,6 +368,16 @@ export default function Dashboard() {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-3 py-3 text-center w-10">
+                  {results.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={results.length > 0 && selectedIds.size === results.length}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  )}
+                </th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-500">플랫폼</th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-500">강사</th>
                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-500">강의</th>
@@ -323,14 +389,37 @@ export default function Dashboard() {
             <tbody className="divide-y divide-gray-100">
               {results.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-16 text-center text-gray-400">
+                  <td colSpan={7} className="px-5 py-16 text-center text-gray-400">
                     <div className="text-4xl mb-3">🔍</div>
                     <div>위에서 강의 URL을 넣고 조회해보세요</div>
                   </td>
                 </tr>
               ) : (
-                groupResults(results).map(group => (
+                groupResults(results).map(group => {
+                  const groupIds = group.options.map(o => o.id);
+                  const allChecked = groupIds.every(id => selectedIds.has(id));
+                  const someChecked = groupIds.some(id => selectedIds.has(id));
+                  return (
                   <tr key={group.key} className="hover:bg-gray-50">
+                    <td className="px-3 py-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={allChecked}
+                        ref={el => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                        onChange={() => {
+                          setSelectedIds(prev => {
+                            const next = new Set(prev);
+                            if (allChecked) {
+                              groupIds.forEach(id => next.delete(id));
+                            } else {
+                              groupIds.forEach(id => next.add(id));
+                            }
+                            return next;
+                          });
+                        }}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
                     <td className="px-5 py-4 text-sm font-medium text-gray-900">{group.platform}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">{group.instructor}</td>
                     <td className="px-5 py-4 text-sm text-gray-600 max-w-xs truncate" title={group.baseTitle}>{group.baseTitle}</td>
@@ -357,7 +446,8 @@ export default function Dashboard() {
                       </span>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

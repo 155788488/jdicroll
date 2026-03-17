@@ -39,14 +39,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ skipped: true, reason: 'Not scheduled day' });
   }
 
-  // Check if already ran today
-  if (schedule.last_run_at) {
-    const lastRunKST = new Date(new Date(schedule.last_run_at).getTime() + 9 * 60 * 60 * 1000);
-    const lastRunDate = lastRunKST.toISOString().split('T')[0];
-    if (lastRunDate === todayKST) {
-      return NextResponse.json({ skipped: true, reason: 'Already ran today' });
+  // Check if scheduled run already happened today (수동 실행과 구분)
+  if (schedule.last_scheduled_run_at) {
+    const lastSchedKST = new Date(new Date(schedule.last_scheduled_run_at).getTime() + 9 * 60 * 60 * 1000);
+    const lastSchedDate = lastSchedKST.toISOString().split('T')[0];
+    if (lastSchedDate === todayKST) {
+      return NextResponse.json({ skipped: true, reason: 'Already ran today (scheduled)' });
     }
   }
+
+  // Mark scheduled run time BEFORE triggering (중복 실행 방지)
+  await supabaseAdmin
+    .from('cron_schedules')
+    .update({ last_scheduled_run_at: now.toISOString(), last_run_at: now.toISOString() })
+    .eq('id', schedule.id);
 
   // Trigger the run
   const runUrl = new URL('/api/schedule/run', req.url);
