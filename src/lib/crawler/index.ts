@@ -123,43 +123,29 @@ export async function crawlPlatform(target: CrawlTarget): Promise<CrawlResultDat
         }
       }
 
-      // Find the course — 유료강의 URL이 있으면 직접 사용, 없으면 목록에서 검색
-      let courseUrl: string;
-      let courseId: string;
-
-      const isPaidUrl = target.url && target.url.includes('/courses/') && !target.url.includes('/free-courses/');
-      if (isPaidUrl && target.url) {
-        courseUrl = target.url;
-        const idMatch = courseUrl.match(/\/courses\/([a-f0-9-]+)/);
-        courseId = idMatch ? idMatch[1] : courseUrl.split('/courses/')[1]?.split(/[?#]/)[0] || '';
-      } else {
-        const course = await findCourseOnPlatform(page, platform.coursesUrl, target.instructor);
-        if (!course) {
-          return {
-            platform: platform.name,
-            instructor: target.instructor,
-            courseTitle: target.courseTitle,
-            enrollmentCount: null,
-            price: null,
-            optionName: '',
-            estimatedRevenue: null,
-            status: 'failed',
-            errorMessage: `Course not found for instructor: ${target.instructor}`,
-          };
-        }
-        courseUrl = course.courseUrl;
-        courseId = course.courseId;
+      // Find the course — 항상 플랫폼 목록 페이지에서 유료강의 검색
+      const course = await findCourseOnPlatform(page, platform.coursesUrl, target.instructor);
+      if (!course) {
+        return {
+          platform: platform.name,
+          instructor: target.instructor,
+          courseTitle: target.courseTitle,
+          enrollmentCount: null,
+          price: null,
+          optionName: '',
+          estimatedRevenue: null,
+          status: 'failed',
+          errorMessage: `Course not found for instructor: ${target.instructor}`,
+        };
       }
 
-      // Navigate to course detail (코주부는 추출기 내부에서 직접 goto + 네트워크 캡처)
-      const coursePath = new URL(courseUrl).pathname;
-      if (platform.extractionMethod !== 'cojooboo') {
-        await page.goto(courseUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        await page.waitForTimeout(2000);
-      }
+      // Navigate to course detail
+      await page.goto(course.courseUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.waitForTimeout(2000);
 
       // Extract enrollment data (배열 반환)
-      const options = await extractEnrollment(page, platform.extractionMethod, courseId, coursePath);
+      const coursePath = new URL(course.courseUrl).pathname;
+      const options = await extractEnrollment(page, platform.extractionMethod, course.courseId, coursePath);
       const first = options[0];
 
       const estimatedRevenue = (first.enrollmentCount && first.price)

@@ -112,18 +112,11 @@ export async function extractViaRscScript(page: Page): Promise<ExtractionResult[
   return [{ enrollmentCount: count, price, optionName: '얼리버드' }];
 }
 
-// Method for 코주부클래스: 페이지 로드 후 스크립트 태그에서 enrollments 추출
+// Method for 코주부클래스: 페이지 HTML 스크립트 태그에서 enrollments 추출
 // 코주부는 self.__next_f.push 스크립트로 데이터를 스트리밍하며,
 // 코스 레벨 _count.enrollments에 실제 결제량이 있음
 export async function extractViaCojooboo(page: Page, courseId: string, coursePath?: string): Promise<ExtractionResult[]> {
-  // 페이지 로드 (crawlPlatform에서 코주부는 goto 건너뛰므로 여기서 직접)
-  const targetUrl = coursePath
-    ? `https://www.cojooboo.co.kr${coursePath}`
-    : page.url();
-  await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
-  await page.waitForTimeout(3000);
-
-  // 전체 HTML 소스를 가져와서 Node.js에서 파싱 (스크립트 실행 후 DOM 변경 무관)
+  // 이미 crawlPlatform에서 page.goto 완료된 상태 — HTML만 파싱
   const html = await page.content();
 
   // 이스케이프된 따옴표(\" ) 를 일반 따옴표로 변환하여 파싱
